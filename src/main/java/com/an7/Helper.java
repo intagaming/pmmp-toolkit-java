@@ -8,6 +8,6 @@ public class Helper {
 
     public static boolean isPmmpPath(Path path) {
         Path pmmpPhar = path.resolve(PMMP_FILE);
-        return Files.isRegularFile(pmmpPhar);
+        return Files.isRegularFile(pmmpPhar) || Files.isSymbolicLink(pmmpPhar);
     }
 }

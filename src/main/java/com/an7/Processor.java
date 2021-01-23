@@ -5,6 +5,7 @@ import org.apache.commons.io.FilenameUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -30,7 +31,9 @@ public class Processor {
             // Dictionary of repo entries
             repoFiles = getRepoFiles(args.getRepoSource());
 
-            // Processable paths: 3 things: the pmmp path, the /plugins path, and /virions path.
+            // Processable paths:
+            // Case 1: traditional pmmp, 3 things: the pmmp path, the /plugins path, and /virions path.
+            // Case 2: docker pmmp, 2 things: /plugins, and /data/virions
             processablePaths = getProcessablePaths(args.getDirectories());
 
             // Entries: Relinkable paths, including PocketMine-MP.phar, *.phar and folders in /plugins and /virions
@@ -68,7 +71,7 @@ public class Processor {
         if (!Files.isDirectory(repoPath)) {
             throw new RuntimeException("Repo not exists: " + repoDir);
         }
-        return Files.walk(repoPath, 1)
+        return Files.walk(repoPath, 1, FileVisitOption.FOLLOW_LINKS)
                 .collect(Collectors.toMap(path -> path.getFileName().toString(), path -> {
                     // Custom repo paths (for plugins that don't have /src folder in root)
                     Map<String, String> customPaths = CustomRepoPaths.get();
@@ -95,15 +98,28 @@ public class Processor {
                 continue;
             }
             dirPath = dirPath.toAbsolutePath(); // Fix workspace errors (getParent() == null)
-            processablePaths.add(dirPath);
 
             // See if have /plugins or /virions paths. Add those.
-            Path pluginsPath = dirPath.resolve("plugins");
-            Path virionsPath = dirPath.resolve("virions");
-            if (Files.isDirectory(pluginsPath) && Files.isDirectory(virionsPath)) {
-                System.out.println("Detected server folder: " + dirPath + ". Adding /plugins and /virions to process...");
-                processablePaths.add(pluginsPath);
-                processablePaths.add(virionsPath);
+            Path pmmpPhar = dirPath.resolve("PocketMine-MP.phar");
+            if (Files.isRegularFile(pmmpPhar)) {
+                System.out.println("Detected traditional pmmp folder: " + dirPath + ". Adding PocketMine-MP.phar, /plugins and /virions to process...");
+                processablePaths.add(pmmpPhar);
+                Path pluginsPath = dirPath.resolve("plugins");
+                Path virionsPath = dirPath.resolve("virions");
+                if (Files.isDirectory(pluginsPath)) {
+                    processablePaths.add(pluginsPath);
+                }
+                if (Files.isDirectory(virionsPath)) {
+                    processablePaths.add(virionsPath);
+                }
+            } else {
+                Path pluginsPath = dirPath.resolve("plugins");
+                Path virionsPath = dirPath.resolve("data").resolve("virions");
+                if (Files.isDirectory(pluginsPath) && Files.isDirectory(virionsPath)) {
+                    System.out.println("Detected Docker pmmp folder: " + dirPath + ". Adding /plugins and /data/virions to process...");
+                    processablePaths.add(pluginsPath);
+                    processablePaths.add(virionsPath);
+                }
             }
         }
         return processablePaths;
@@ -112,11 +128,10 @@ public class Processor {
     private List<Path> getEntries(List<Path> processablePaths) throws IOException {
         List<Path> entries = new ArrayList<>();
         for (Path dirPath : processablePaths) {
-            Path pmmpPhar = dirPath.resolve("PocketMine-MP.phar");
-            if (Files.isRegularFile(pmmpPhar)) {
-                // This is server folder. Only add the phar
+            if (dirPath.getFileName().toString().equals("PocketMine-MP.phar")
+                && (Files.isRegularFile(dirPath) || Files.isSymbolicLink(dirPath))) {
                 System.out.println("PocketMine-MP.phar detected in " + dirPath + "! Adding to be linked...");
-                entries.add(pmmpPhar);
+                entries.add(dirPath);
             } else {
                 // This is /plugins or /virions folder. Add all.
                 entries.addAll(getEntries(dirPath));
@@ -133,10 +148,10 @@ public class Processor {
         if (!Files.isDirectory(folder)) {
             return;
         }
-        String relinkFolderPath = folder.getParent()
-                .resolve("relink-" + folder.getFileName() + "-" + Instant.now().getEpochSecond()).toString();
+        Path relinkFolderPath = folder.getParent()
+                .resolve("relink-" + folder.getFileName() + "-" + Instant.now().getEpochSecond());
         // no pure java here?
-        FileUtils.copyDirectory(new File(folder.toString()), new File(relinkFolderPath));
+        FileUtils.copyDirectory(new File(folder.toString()), new File(relinkFolderPath.toString()));
     }
 
     private void backupFile(Path file) throws IOException {
@@ -159,18 +174,18 @@ public class Processor {
             String folderName = FilenameUtils.getBaseName(entry.getFileName().toString());
             try {
                 if (repoFiles.containsKey(pharName)) { // Check if phar exists
-                    Files.delete(entry);
+                    Files.deleteIfExists(entry.getParent().resolve(pharName));
                     Files.createSymbolicLink(entry.getParent().resolve(pharName),
                             entry.getParent().relativize(repoFiles.get(pharName)));
                 } else if (repoFiles.containsKey(folderName)) { // Check if folder exists
-                    Files.delete(entry);
+                    FileUtils.deleteDirectory(entry.getParent().resolve(folderName).toFile());
                     Files.createSymbolicLink(entry.getParent().resolve(folderName),
                             entry.getParent().relativize(repoFiles.get(folderName)));
                 } else { // Can't find in repo
                     System.out.println("Can't find " + entry.getFileName() + " in repo. Skipping...");
                 }
             } catch (Exception e) {
-                throw new RuntimeException(e.getMessage());
+                e.printStackTrace();
             }
         });
     }
