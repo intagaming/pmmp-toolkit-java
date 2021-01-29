@@ -6,7 +6,7 @@
 
     <groupId>com.an7</groupId>
     <artifactId>pmmp-toolkit</artifactId>
-    <version>1.1-SNAPSHOT</version>
+    <version>1.1.1-SNAPSHOT</version>
 
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
