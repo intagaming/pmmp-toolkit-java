@@ -4,6 +4,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
@@ -151,7 +152,12 @@ public class Processor {
         Path relinkFolderPath = folder.getParent()
                 .resolve("relink-" + folder.getFileName() + "-" + Instant.now().getEpochSecond());
         // no pure java here?
-        FileUtils.copyDirectory(new File(folder.toString()), new File(relinkFolderPath.toString()));
+        FileUtils.copyDirectory(new File(folder.toString()), new File(relinkFolderPath.toString()), new FileFilter() {
+            @Override
+            public boolean accept(File pathname) {
+                return pathname.isFile() || pathname.isDirectory();
+            }
+        });
     }
 
     private void backupFile(Path file) throws IOException {
@@ -178,7 +184,12 @@ public class Processor {
                     Files.createSymbolicLink(entry.getParent().resolve(pharName),
                             entry.getParent().relativize(repoFiles.get(pharName)));
                 } else if (repoFiles.containsKey(folderName)) { // Check if folder exists
-                    FileUtils.deleteDirectory(entry.getParent().resolve(folderName).toFile());
+                    File folder = entry.getParent().resolve(folderName).toFile();
+                    if (folder.isDirectory()) {
+                        FileUtils.deleteDirectory(folder);
+                    } else {
+                        Files.deleteIfExists(folder.toPath());
+                    }
                     Files.createSymbolicLink(entry.getParent().resolve(folderName),
                             entry.getParent().relativize(repoFiles.get(folderName)));
                 } else { // Can't find in repo
